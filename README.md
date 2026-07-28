@@ -5,9 +5,6 @@ A robust, multithreaded PowerShell 7 script designed to take a chaotic folder of
 Author: Ayush Rai
 (ɪᴏᴅᴀ)
 <br>
-Pro Automated Media Ingestion Pipeline (PS7)
-A robust, multithreaded PowerShell 7 script designed to take a chaotic folder of downloaded media (audio and video files) and automatically transform it into a perfectly tagged, organized music library.
-
 This pipeline acts as a smart sorting facility. It separates videos from audio, extracts audio tracks from video files losslessly, hunts down duplicates using cryptographic hashes, and uses the Apple iTunes API to fetch accurate metadata and high-resolution cover art.
 
 ✨ Key Features
