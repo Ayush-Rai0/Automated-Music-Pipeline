@@ -28,7 +28,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
                 Start-Sleep -Seconds 2
                 
                 # Relaunch in the newly installed PowerShell 7
-                & $pwshPath -ExecutionPolicy Bypass -File$PSCommandPath
+                & $pwshPath -ExecutionPolicy Bypass -File $PSCommandPath
                 exit # Kill the 5.1 process
             } else {
                 Write-Host "`n[!] Installation finished, but couldn't locate pwsh.exe. Please launch PowerShell 7 manually." -ForegroundColor Red
