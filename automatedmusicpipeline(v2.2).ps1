@@ -1,8 +1,49 @@
 # ============================================================================
-# Pro Automated Media Sorting, Extraction, and Organization Pipeline (PS7)
+# Pro Automated Media Sorting, Extraction, and Organization Pipeline
 # ============================================================================
 
-# --- Prerequisite Checks ---
+# --- Auto-Bootstrapper: PowerShell 7 Relauncher ---
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    # Define the default installation path for PowerShell 7
+    $pwshPath = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+    
+    # SCENARIO 1: PS7 is already installed, they just ran it in the wrong window
+    if (Test-Path $pwshPath) {
+        Write-Host "`n[*] Switching to PowerShell 7 environment..." -ForegroundColor Cyan
+        & $pwshPath -ExecutionPolicy Bypass -File $PSCommandPath
+        exit # Kill the 5.1 process
+    } 
+    # SCENARIO 2: PS7 is completely missing from the system
+    else {
+        Write-Host "`n[!] Windows PowerShell 5.1 detected. This pipeline requires PowerShell 7." -ForegroundColor Yellow
+        $installChoice = Read-Host "Do you want to automatically install PowerShell 7 and relaunch? (Y/N)"
+        
+        if ($installChoice -match "^[Yy]") {
+            Write-Host "`nDownloading and installing PowerShell 7 via winget... Please wait." -ForegroundColor Cyan
+            
+            winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements --silent
+            
+            if (Test-Path $pwshPath) {
+                Write-Host "`n[+] Installation successful! Relaunching pipeline..." -ForegroundColor Green
+                Start-Sleep -Seconds 2
+                
+                # Relaunch in the newly installed PowerShell 7
+                & $pwshPath -ExecutionPolicy Bypass -File$PSCommandPath
+                exit # Kill the 5.1 process
+            } else {
+                Write-Host "`n[!] Installation finished, but couldn't locate pwsh.exe. Please launch PowerShell 7 manually." -ForegroundColor Red
+                exit
+            }
+        } else {
+            Write-Host "`nExiting pipeline. PowerShell 7 must be installed to continue." -ForegroundColor Red
+            exit
+        }
+    }
+}
+# --- End Bootstrapper ---
+
+
+# --- FFmpeg Prerequisite Check ---
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
     Write-Host "`n[!] Error: FFmpeg is not installed but is required for extraction and metadata tagging." -ForegroundColor Red
     $installChoice = Read-Host "Do you want to install it now via winget? (Y/N)"
@@ -237,7 +278,7 @@ $asciiWatermark = @"
   ██║ ██║   ██║██║  ██║███████║ ╚═╝ ███████╗
   ██║ ██║   ██║██║  ██║██╔══██║     ╚════██║
   ██║ ╚██████╔╝██████╔╝██║  ██║     ███████╗
-  ╚═╝  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝     ╚══════╝
+  ╚═╝  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝     ╚══════╝ ~ Ayush Rai
 "@
 
 Write-Host $asciiWatermark -ForegroundColor Cyan
