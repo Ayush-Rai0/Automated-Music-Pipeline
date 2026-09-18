@@ -4,8 +4,24 @@
 
 # --- Auto-Bootstrapper: PowerShell 7 Relauncher ---
 if ($PSVersionTable.PSVersion.Major -lt 7) {
-    # Define the default installation path for PowerShell 7
-    $pwshPath = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+    
+    $pwshPath = $null
+    
+    # Safely check if pwsh is in the system PATH using a Try/Catch
+    try {
+        $found = Get-Command pwsh -ErrorAction Stop
+        $pwshPath = $found.Source
+    } catch {
+        # pwsh is not in the PATH, manually check common installation directories
+        $fallbackPaths = @(
+            "$env:ProgramFiles\PowerShell\7\pwsh.exe",
+            "$env:LOCALAPPDATA\Programs\PowerShell\7\pwsh.exe",
+            "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe"
+        )
+        foreach ($path in $fallbackPaths) {
+            if (Test-Path $path) { $pwshPath = $path; break }
+        }
+    }
     
     # SCENARIO 1: PS7 is already installed, they just ran it in the wrong window
     if (Test-Path $pwshPath) {
@@ -41,6 +57,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
     }
 }
 # --- End Bootstrapper ---
+
 
 
 # --- FFmpeg Prerequisite Check ---
@@ -155,14 +172,14 @@ Function Organize-AudioFiles {
         
         # ====================================================================
 
-        # Null-safe PS7 Ternary Operators (Fallback to BaseName if ALL searches failed)
-        $mTitle  = ($null -ne $onlineData -and $onlineData.Title) ? $onlineData.Title : $baseSearch
-        $mArtist = ($null -ne $onlineData -and $onlineData.Artist) ? $onlineData.Artist : "Unknown Artist"
-        $mAlbum  = ($null -ne $onlineData -and $onlineData.Album) ? $onlineData.Album : "Unknown Album"
-        $mTrack  = ($null -ne $onlineData -and $onlineData.TrackNumber) ? $onlineData.TrackNumber : ""
-        $mGenre  = ($null -ne $onlineData -and $onlineData.Genre) ? $onlineData.Genre : ""
-        $mYear   = ($null -ne $onlineData -and $onlineData.Year) ? $onlineData.Year : ""
-        $mCopy   = ($null -ne $onlineData -and $onlineData.Copyright) ? $onlineData.Copyright : ""
+        # Standard If assignments (Ensures PS5.1 can parse the file without syntax errors before the bootstrapper kicks in)
+        $mTitle  = $baseSearch; if ($null -ne $onlineData -and $onlineData.Title) { $mTitle = $onlineData.Title }
+        $mArtist = "Unknown Artist"; if ($null -ne $onlineData -and $onlineData.Artist) { $mArtist = $onlineData.Artist }
+        $mAlbum  = "Unknown Album"; if ($null -ne $onlineData -and $onlineData.Album) { $mAlbum = $onlineData.Album }
+        $mTrack  = ""; if ($null -ne $onlineData -and $onlineData.TrackNumber) { $mTrack = $onlineData.TrackNumber }
+        $mGenre  = ""; if ($null -ne $onlineData -and $onlineData.Genre) { $mGenre = $onlineData.Genre }
+        $mYear   = ""; if ($null -ne $onlineData -and $onlineData.Year) { $mYear = $onlineData.Year }
+        $mCopy   = ""; if ($null -ne $onlineData -and $onlineData.Copyright) { $mCopy = $onlineData.Copyright }
 
         # Sanitize the final saved filename for Windows
         $invalidChars = '[<>:"/\\|?*⧸∕]'
