@@ -1,17 +1,16 @@
 # ============================================================================
-# TagMedic Backend Pipeline (Pro Automated Media Organization)
-# Version 2.3 - Optimized
+# Pro Automated Media Sorting, Extraction, and Organization Pipeline
 # ============================================================================
 
 # --- Auto-Bootstrapper: PowerShell 7 Relauncher ---
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     
-    $pwshPath =$null
+    $pwshPath = $null
     
     # Safely check if pwsh is in the system PATH using a Try/Catch
     try {
         $found = Get-Command pwsh -ErrorAction Stop
-        $pwshPath =$found.Source
+        $pwshPath = $found.Source
     } catch {
         # pwsh is not in the PATH, manually check common installation directories
         $fallbackPaths = @(
@@ -19,16 +18,16 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
             "$env:LOCALAPPDATA\Programs\PowerShell\7\pwsh.exe",
             "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe"
         )
-        foreach ($path in$fallbackPaths) {
-            if (Test-Path $path) { $pwshPath =$path; break }
+        foreach ($path in $fallbackPaths) {
+            if (Test-Path $path) { $pwshPath = $path; break }
         }
     }
     
-    # SCENARIO 1: PS7 is already installed, safely check for null BEFORE running Test-Path
-    if ($null -ne $pwshPath -and (Test-Path$pwshPath)) {
+    # SCENARIO 1: PS7 is already installed, they just ran it in the wrong window
+    if (Test-Path $pwshPath) {
         Write-Host "`n[*] Switching to PowerShell 7 environment..." -ForegroundColor Cyan
         & $pwshPath -ExecutionPolicy Bypass -File $PSCommandPath
-        exit 
+        exit # Kill the 5.1 process
     } 
     # SCENARIO 2: PS7 is completely missing from the system
     else {
@@ -40,7 +39,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
             
             winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements --silent
             
-            # EXPLICITLY DEFINE the new installation path
+            # RE-DEFINE THE PATH after winget finishes
             $newPwshPath = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
             
             if (Test-Path $newPwshPath) {
@@ -48,8 +47,8 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
                 Start-Sleep -Seconds 2
                 
                 # Relaunch in the newly installed PowerShell 7
-                & $newPwshPath -ExecutionPolicy Bypass -File$PSCommandPath
-                exit 
+                & $newPwshPath -ExecutionPolicy Bypass -File $PSCommandPath
+                exit # Kill the 5.1 process
             } else {
                 Write-Host "`n[!] Installation finished, but couldn't locate pwsh.exe. Please launch PowerShell 7 manually." -ForegroundColor Red
                 exit
@@ -61,6 +60,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
     }
 }
 # --- End Bootstrapper ---
+
 
 
 # --- FFmpeg Prerequisite Check ---
@@ -92,16 +92,12 @@ Function Search-OnlineMetadata {
     $url = "https://itunes.apple.com/search?term=$safeQuery&entity=song&limit=1"
     
     try {
-        $response = Invoke-RestMethod -Uri$url -Method Get -ErrorAction Stop
-        
-        # [OPTIMIZATION] Rate Limit Protection (250ms delay) to prevent Apple IP ban
-        Start-Sleep -Milliseconds 250 
-
+        $response = Invoke-RestMethod -Uri $url -Method Get -ErrorAction Stop
         if ($response.resultCount -gt 0) {
-            $track =$response.results[0]
+            $track = $response.results[0]
             
             # iTunes returns 100x100 thumbnails by default. Replace with 600x600 for high quality.
-            $artUrl =$track.artworkUrl100 -replace '100x100bb', '600x600bb'
+            $artUrl = $track.artworkUrl100 -replace '100x100bb', '600x600bb'
             
             # Parse Release Year safely
             $releaseYear = ""
@@ -123,17 +119,20 @@ Function Search-OnlineMetadata {
 }
 
 Function Organize-AudioFiles {
-    param ([string]$SourcePath, [string]$DestinationPath, [string]$StepName)$audioExtensions = @('.mp3', '.m4a', '.flac', '.wav', '.wma', '.ogg')
-    $files = Get-ChildItem -LiteralPath$SourcePath -File | Where-Object { $_.Extension -in$audioExtensions }
+    param ([string]$SourcePath, [string]$DestinationPath, [string]$StepName)
     
-    $totalFiles =$files.Count
+    $audioExtensions = @('.mp3', '.m4a', '.flac', '.wav', '.wma', '.ogg')
+    $files = Get-ChildItem -LiteralPath $SourcePath -File | Where-Object { $_.Extension -in $audioExtensions }
+    
+    $totalFiles = $files.Count
     if ($totalFiles -eq 0) { Write-Host "  No audio files to organize in this pass." -ForegroundColor Gray; return }
 
     Write-Host "  Tagging and processing $totalFiles audio files..." -ForegroundColor Cyan
     $counter = 0
 
-    foreach ($file in$files) {
-        $counter++$percent = [math]::Round(($counter / $totalFiles) * 100)
+    foreach ($file in $files) {
+        $counter++
+        $percent = [math]::Round(($counter / $totalFiles) * 100)
         Write-Progress -Activity $StepName -Status "Processing: $($file.Name)" -PercentComplete $percent -Id 1
 
         # ====================================================================
@@ -141,18 +140,19 @@ Function Organize-AudioFiles {
         # ====================================================================
         
         # 1. Baseline Scrubbing
-        $baseName =$file.BaseName.Split('|')[0]
-        $baseName =$baseName -replace '\((?![^\)]*\b(?:19|20)\d{2}\b)[^\)]*\)', '' `
+        $baseName = $file.BaseName.Split('|')[0]
+        $baseName = $baseName -replace '\((?![^\)]*\b(?:19|20)\d{2}\b)[^\)]*\)', '' `
                               -replace '\[(?![^\]]*\b(?:19|20)\d{2}\b)[^\]]*\]', ''
         $baseName = $baseName -replace '(?i)official( music)? video', '' `
                               -replace '(?i)(official )?lyrics?', ''
-        $normalized =$baseName.Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', ''
+        $normalized = $baseName.Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', ''
         $baseSearch = ($normalized -replace '\s+', ' ').Trim()
 
-        $onlineData = $null$searchStrategies = @()
+        $onlineData = $null
+        $searchStrategies = @()
         
         # Strategy A: Exact Cleaned Match
-        $searchStrategies +=$baseSearch
+        $searchStrategies += $baseSearch
         
         # Strategy B: Swap Hyphens/Underscores for spaces
         $searchStrategies += ($baseSearch -replace '[-_]', ' ' -replace '\s+', ' ').Trim()
@@ -167,35 +167,40 @@ Function Organize-AudioFiles {
         }
 
         # Run the strategies until Apple returns a match
-        foreach ($term in$searchStrategies | Select-Object -Unique) {
+        foreach ($term in $searchStrategies | Select-Object -Unique) {
             if ([string]::IsNullOrWhiteSpace($term)) { continue }
-            $onlineData = Search-OnlineMetadata -SearchTerm$term
-            if ($null -ne$onlineData) { break } # Match found, stop searching!
+            $onlineData = Search-OnlineMetadata -SearchTerm $term
+            if ($null -ne $onlineData) { break } # Match found, stop searching!
         }
         
         # ====================================================================
 
         # Standard If assignments (Ensures PS5.1 can parse the file without syntax errors before the bootstrapper kicks in)
-        $mTitle  =$baseSearch; if ($null -ne$onlineData -and $onlineData.Title) {$mTitle = $onlineData.Title }$mArtist = "Unknown Artist"; if ($null -ne$onlineData -and $onlineData.Artist) {$mArtist = $onlineData.Artist }$mAlbum  = "Unknown Album"; if ($null -ne $onlineData -and$onlineData.Album) { $mAlbum =$onlineData.Album }
-        $mTrack  = ""; if ($null -ne $onlineData -and$onlineData.TrackNumber) { $mTrack =$onlineData.TrackNumber }
-        $mGenre  = ""; if ($null -ne $onlineData -and$onlineData.Genre) { $mGenre =$onlineData.Genre }
-        $mYear   = ""; if ($null -ne $onlineData -and$onlineData.Year) { $mYear =$onlineData.Year }
-        $mCopy   = ""; if ($null -ne $onlineData -and$onlineData.Copyright) { $mCopy =$onlineData.Copyright }
+        $mTitle  = $baseSearch; if ($null -ne $onlineData -and $onlineData.Title) { $mTitle = $onlineData.Title }
+        $mArtist = "Unknown Artist"; if ($null -ne $onlineData -and $onlineData.Artist) { $mArtist = $onlineData.Artist }
+        $mAlbum  = "Unknown Album"; if ($null -ne $onlineData -and $onlineData.Album) { $mAlbum = $onlineData.Album }
+        $mTrack  = ""; if ($null -ne $onlineData -and $onlineData.TrackNumber) { $mTrack = $onlineData.TrackNumber }
+        $mGenre  = ""; if ($null -ne $onlineData -and $onlineData.Genre) { $mGenre = $onlineData.Genre }
+        $mYear   = ""; if ($null -ne $onlineData -and $onlineData.Year) { $mYear = $onlineData.Year }
+        $mCopy   = ""; if ($null -ne $onlineData -and $onlineData.Copyright) { $mCopy = $onlineData.Copyright }
 
         # Sanitize the final saved filename for Windows
         $invalidChars = '[<>:"/\\|?*⧸∕]'
-        $safeFileName = ($mTitle -replace $invalidChars, '').Trim() +$file.Extension
-        $targetPath = Join-Path -Path $DestinationPath -ChildPath$safeFileName
+        $safeFileName = ($mTitle -replace $invalidChars, '').Trim() + $file.Extension
+        $targetPath = Join-Path -Path $DestinationPath -ChildPath $safeFileName
 
         # Build FFmpeg Arguments list
         $argsList = @("-y", "-i", "`"$($file.FullName)`"")
-        $isMp3 = ($file.Extension -match '(?i)\.mp3')$coverPath = ""
+        $isMp3 = ($file.Extension -match '(?i)\.mp3')
+        $coverPath = ""
 
         # Handle Album Art download and injection
-        if ($null -ne$onlineData -and $onlineData.ArtworkUrl) {$coverPath = Join-Path $env:TEMP "$([guid]::NewGuid()).jpg"
+        if ($null -ne $onlineData -and $onlineData.ArtworkUrl) {
+            $coverPath = Join-Path $env:TEMP "$([guid]::NewGuid()).jpg"
             try {
-                Invoke-WebRequest -Uri $onlineData.ArtworkUrl -OutFile $coverPath -ErrorAction SilentlyContinue \vert{} Out-Null$argsList += "-i", "`"$coverPath`"", "-map", "0:a", "-map", "1:v", "-c:a", "copy", "-c:v", "mjpeg", "-disposition:v", "attached_pic"
-                if ($isMp3) {$argsList += "-id3v2_version", "3" }
+                Invoke-WebRequest -Uri $onlineData.ArtworkUrl -OutFile $coverPath -ErrorAction SilentlyContinue | Out-Null
+                $argsList += "-i", "`"$coverPath`"", "-map", "0:a", "-map", "1:v", "-c:a", "copy", "-c:v", "mjpeg", "-disposition:v", "attached_pic"
+                if ($isMp3) { $argsList += "-id3v2_version", "3" }
             } catch {
                 $argsList += "-c", "copy"
             }
@@ -207,23 +212,23 @@ Function Organize-AudioFiles {
         $argsList += "-metadata", "title=`"$($mTitle -replace '"', '\"')`""
         $argsList += "-metadata", "artist=`"$($mArtist -replace '"', '\"')`""
         $argsList += "-metadata", "album=`"$($mAlbum -replace '"', '\"')`""
-        if ($mTrack) {$argsList += "-metadata", "track=`"$($mTrack -replace '"', '\"')`"" }
-        if ($mGenre) {$argsList += "-metadata", "genre=`"$($mGenre -replace '"', '\"')`"" }
-        if ($mYear)  {$argsList += "-metadata", "date=`"$($mYear -replace '"', '\"')`"" }
-        if ($mCopy)  {$argsList += "-metadata", "copyright=`"$($mCopy -replace '"', '\"')`"" }
+        if ($mTrack) { $argsList += "-metadata", "track=`"$($mTrack -replace '"', '\"')`"" }
+        if ($mGenre) { $argsList += "-metadata", "genre=`"$($mGenre -replace '"', '\"')`"" }
+        if ($mYear)  { $argsList += "-metadata", "date=`"$($mYear -replace '"', '\"')`"" }
+        if ($mCopy)  { $argsList += "-metadata", "copyright=`"$($mCopy -replace '"', '\"')`"" }
 
         $argsList += "`"$targetPath`"", "-loglevel", "error"
-        $ffmpegArgs =$argsList -join " "
+        $ffmpegArgs = $argsList -join " "
 
         # Execute injection
         try {
             $process = Start-Process -FilePath "ffmpeg" -ArgumentList $ffmpegArgs -Wait -NoNewWindow -PassThru
-            if ($process.ExitCode -eq 0) { Remove-Item -LiteralPath$file.FullName -Force -ErrorAction SilentlyContinue }
-            else { Move-Item -LiteralPath $file.FullName -Destination$targetPath -Force -ErrorAction SilentlyContinue }
-        } catch { Move-Item -LiteralPath $file.FullName -Destination$targetPath -Force -ErrorAction SilentlyContinue }
+            if ($process.ExitCode -eq 0) { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue }
+            else { Move-Item -LiteralPath $file.FullName -Destination $targetPath -Force -ErrorAction SilentlyContinue }
+        } catch { Move-Item -LiteralPath $file.FullName -Destination $targetPath -Force -ErrorAction SilentlyContinue }
 
         # Cleanup Temp Cover Image
-        if (Test-Path $coverPath) { Remove-Item -Path$coverPath -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $coverPath) { Remove-Item -Path $coverPath -Force -ErrorAction SilentlyContinue }
     }
     Write-Progress -Activity $StepName -Completed -Id 1
 }
@@ -233,53 +238,21 @@ Function Remove-DuplicatesInteractive {
     
     if (-not (Test-Path $ScanPath)) { return }
     
-    $files = Get-ChildItem -Path$ScanPath -File -Recurse
+    $files = Get-ChildItem -Path $ScanPath -File -Recurse
     if ($files.Count -eq 0) { Write-Host "  No files found to scan." -ForegroundColor Gray; return }
 
-    Write-Host "  Scanning for duplicates..." -ForegroundColor DarkGray
-    
-    # [OPTIMIZATION] 3-Tier Hashing (Length -> 1MB Partial -> Full MD5)
-    # Tier 1: Group by Length
-    $lengthGroups =$files | Group-Object -Property Length | Where-Object { $_.Count -gt 1 }$dupes = @()
-
-    foreach ($group in$lengthGroups) {
-        
-        # Tier 2: Partial Hash (First 1MB)
-        $partialHashes = foreach ($file in$group.Group) {
-            try {
-                $stream = [System.IO.File]::OpenRead($file.FullName)$buffer = New-Object byte[] 1048576 # 1MB buffer
-                $bytesRead =$stream.Read($buffer, 0, 1048576)$md5 = [System.Security.Cryptography.MD5]::Create()
-                $hashBytes =$md5.ComputeHash($buffer, 0,$bytesRead)
-                $hashString = [System.BitConverter]::ToString($hashBytes) -replace '-'
-                
-                [PSCustomObject]@{
-                    File = $file
-                    PartialHash = $hashString
-                }
-            } finally {
-                if ($null -ne $stream) {$stream.Dispose() }
-            }
-        }
-        
-        $partialGroups = $partialHashes \vert{} Group-Object -Property PartialHash \vert{} Where-Object {$_.Count -gt 1 }
-        
-        # Tier 3: Full Hash on Partial Matches only
-        foreach ($pGroup in $partialGroups) {$fullGroups = $pGroup.Group.File \vert{} Get-FileHash -Algorithm MD5 \vert{} Group-Object -Property Hash \vert{} Where-Object {$_.Count -gt 1 }
-            foreach ($fGroup in$fullGroups) {
-                $dupes +=$fGroup
-            }
-        }
-    }
+    $dupes = $files | Group-Object -Property Length | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Group } | 
+             Get-FileHash -Algorithm MD5 | Group-Object -Property Hash | Where-Object { $_.Count -gt 1 }
 
     if ($dupes.Count -gt 0) {
         Write-Host "  Found $($dupes.Count) duplicate groups. Starting interactive cleanup..." -ForegroundColor Yellow
-        $globalAction =$null 
+        $globalAction = $null 
 
-        foreach ($group in$dupes) {
-            $sorted =$group.Group | Sort-Object -Property Path
-            $originalFile =$sorted[0].Path
+        foreach ($group in $dupes) {
+            $sorted = $group.Group | Sort-Object -Property Path
+            $originalFile = $sorted[0].Path
             
-            if ($null -eq$globalAction) { Write-Host "`n  [ORIGINAL] (Keeping): $originalFile" -ForegroundColor Green }
+            if ($null -eq $globalAction) { Write-Host "`n  [ORIGINAL] (Keeping): $originalFile" -ForegroundColor Green }
             
             for ($i = 1; $i -lt $sorted.Count; $i++) {
                 $dupFile = $sorted[$i].Path
@@ -330,7 +303,7 @@ $asciiWatermark = @"
 
 Write-Host $asciiWatermark -ForegroundColor Cyan
 Write-Host "`n==================================================" -ForegroundColor Magenta
-Write-Host "    TAGMEDIC PIPELINE ENGINE                      " -ForegroundColor Cyan
+Write-Host "    AUTOMATED MEDIA INGESTION PIPELINE        " -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Magenta
 Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
 
@@ -363,21 +336,21 @@ while (-not $connected) {
 
 $audioExt = @(".mp3", ".wav", ".m4a", ".flac", ".aac", ".wma", ".ogg")
 $videoExt = @(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mts", ".ts", ".3gp")
-$allFiles = Get-ChildItem -LiteralPath$masterPath -File
+$allFiles = Get-ChildItem -LiteralPath $masterPath -File
 
-$hasVideos =$false
-foreach ($file in$allFiles) {
-    if ($videoExt -contains$file.Extension.ToLower()) { $hasVideos =$true; break }
+$hasVideos = $false
+foreach ($file in $allFiles) {
+    if ($videoExt -contains $file.Extension.ToLower()) { $hasVideos = $true; break }
 }
 
-$audioDir = Join-Path$masterPath "Audio_Originals"
-$finalLibraryDir = Join-Path$masterPath "Organized_Media_Library"
+$audioDir = Join-Path $masterPath "Audio_Originals"
+$finalLibraryDir = Join-Path $masterPath "Organized_Media_Library"
 New-Item -ItemType Directory -Path $audioDir -Force | Out-Null
 New-Item -ItemType Directory -Path $finalLibraryDir -Force | Out-Null
 
 if ($hasVideos) {
-    $videoDir = Join-Path$masterPath "Video_Originals"
-    $extractedAudioDir = Join-Path$masterPath "Audio_Extracted"
+    $videoDir = Join-Path $masterPath "Video_Originals"
+    $extractedAudioDir = Join-Path $masterPath "Audio_Extracted"
     New-Item -ItemType Directory -Path $videoDir -Force | Out-Null
     New-Item -ItemType Directory -Path $extractedAudioDir -Force | Out-Null
 }
@@ -413,14 +386,15 @@ Write-Host "  Original audio organized." -ForegroundColor Green
 
 if ($hasVideos) {
     Write-Host "`n[Step 4/6] Extracting Audio from Videos (Multithreaded)..." -ForegroundColor Magenta
-    $videos = Get-ChildItem -LiteralPath$videoDir -File | Where-Object { $videoExt -contains$_.Extension.ToLower() }
+    $videos = Get-ChildItem -LiteralPath $videoDir -File | Where-Object { $videoExt -contains $_.Extension.ToLower() }
     if ($videos.Count -gt 0) {
-        $cores = [System.Environment]::ProcessorCount$throttle = if ($cores -gt 2) {$cores - 1 } else { 1 }
+        $cores = [System.Environment]::ProcessorCount
+        $throttle = if ($cores -gt 2) { $cores - 1 } else { 1 }
         Write-Host "  Using $throttle threads for processing $($videos.Count) videos." -ForegroundColor Cyan
 
         $videos | ForEach-Object -Parallel {
-            $vid =$_; $outDir =$using:extractedAudioDir
-            $outFile = Join-Path$outDir "$($vid.BaseName) [Extracted].mp3"
+            $vid = $_; $outDir = $using:extractedAudioDir
+            $outFile = Join-Path $outDir "$($vid.BaseName) [Extracted].mp3"
             Write-Host "  -> Extracting: $($vid.Name)" -ForegroundColor DarkGray
             
             $args = "-y -i `"$($vid.FullName)`" -vn -acodec libmp3lame -q:a 2 `"$outFile`" -loglevel error"
